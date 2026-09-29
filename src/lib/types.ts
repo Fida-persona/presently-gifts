@@ -46,6 +46,7 @@ export type CartItem = {
 
 export type Order = {
   id: number;
+  userId: number | null;
   items: CartItem[];
   customerName: string;
   email: string;
@@ -54,7 +55,25 @@ export type Order = {
   city: string;
   pincode: string;
   giftMessage: string | null;
+  giftWrapName: string | null;
+  giftWrapPrice: number;
   total: number;
   status: string;
   createdAt: string;
+};
+
+export type User = {
+  id: number;
+  name: string;
+  email: string;
+};
+
+export type GiftWrap = {
+  id: number;
+  name: string;
+  slug: string;
+  description: string;
+  image: string;
+  price: number;
+  sortOrder: number;
 };

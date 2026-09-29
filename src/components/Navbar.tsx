@@ -5,14 +5,16 @@ import Image from "next/image";
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
-import { Gift, Menu, Search, ShoppingBag, X } from "lucide-react";
-import type { Occasion } from "@/lib/types";
+import { Gift, LogOut, Menu, Package, Search, ShoppingBag, User as UserIcon, X } from "lucide-react";
+import type { Occasion, User } from "@/lib/types";
 import { useCartStore } from "@/lib/cart-store";
+import { signOutAction } from "@/lib/actions";
 
-export default function Navbar({ occasions }: { occasions: Occasion[] }) {
+export default function Navbar({ occasions, user }: { occasions: Occasion[]; user: User | null }) {
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [occasionMenuOpen, setOccasionMenuOpen] = useState(false);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [query, setQuery] = useState("");
   const pathname = usePathname();
   const router = useRouter();
@@ -116,6 +118,48 @@ export default function Navbar({ occasions }: { occasions: Occasion[] }) {
               />
             </form>
 
+            {user ? (
+              <div
+                className="relative hidden sm:block"
+                onMouseEnter={() => setAccountMenuOpen(true)}
+                onMouseLeave={() => setAccountMenuOpen(false)}
+              >
+                <button className="flex h-10 w-10 items-center justify-center rounded-full hover:bg-rose-50 transition-colors">
+                  <UserIcon size={20} className="text-ink-900/80" />
+                </button>
+                <AnimatePresence>
+                  {accountMenuOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 8 }}
+                      transition={{ duration: 0.15 }}
+                      className="absolute right-0 top-full z-50 w-52 pt-2"
+                    >
+                      <div className="rounded-2xl border border-rose-100 bg-white p-2 shadow-2xl shadow-rose-900/10">
+                        <p className="truncate px-3 py-2 text-xs text-ink-900/40">Hi, {user.name.split(" ")[0]}</p>
+                        <Link href="/account/orders" className="flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-ink-900/75 hover:bg-rose-50">
+                          <Package size={15} /> My Orders
+                        </Link>
+                        <form action={signOutAction}>
+                          <button className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-ink-900/75 hover:bg-rose-50">
+                            <LogOut size={15} /> Sign Out
+                          </button>
+                        </form>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            ) : (
+              <Link
+                href="/sign-in"
+                className="hidden sm:flex items-center gap-1.5 rounded-full px-3 py-2 text-sm font-medium text-ink-900/80 hover:bg-rose-50 hover:text-rose-600 transition-colors"
+              >
+                <UserIcon size={17} /> Sign In
+              </Link>
+            )}
+
             <button
               onClick={openCart}
               className="relative flex h-10 w-10 items-center justify-center rounded-full hover:bg-rose-50 transition-colors"
@@ -186,6 +230,18 @@ export default function Navbar({ occasions }: { occasions: Occasion[] }) {
               <div className="flex flex-col gap-1 border-t border-rose-100 pt-3">
                 <Link href="/products" className="py-2 text-sm font-medium">All Gifts</Link>
                 <Link href="/products?featured=1" className="py-2 text-sm font-medium">Bestsellers</Link>
+              </div>
+              <div className="flex flex-col gap-1 border-t border-rose-100 pt-3">
+                {user ? (
+                  <>
+                    <Link href="/account/orders" className="py-2 text-sm font-medium">My Orders</Link>
+                    <form action={signOutAction}>
+                      <button className="py-2 text-sm font-medium text-left w-full">Sign Out</button>
+                    </form>
+                  </>
+                ) : (
+                  <Link href="/sign-in" className="py-2 text-sm font-medium">Sign In</Link>
+                )}
               </div>
             </div>
           </motion.div>

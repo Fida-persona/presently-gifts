@@ -59,6 +59,7 @@ async function init() {
       )`,
       `CREATE TABLE IF NOT EXISTS orders (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
         items TEXT NOT NULL DEFAULT '[]',
         customer_name TEXT,
         email TEXT,
@@ -67,13 +68,46 @@ async function init() {
         city TEXT,
         pincode TEXT,
         gift_message TEXT,
+        gift_wrap_name TEXT,
+        gift_wrap_price REAL DEFAULT 0,
         total REAL,
         status TEXT DEFAULT 'placed',
         created_at TEXT DEFAULT CURRENT_TIMESTAMP
       )`,
+      `CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        email TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      )`,
+      `CREATE TABLE IF NOT EXISTS gift_wraps (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        slug TEXT NOT NULL UNIQUE,
+        description TEXT DEFAULT '',
+        image TEXT,
+        price REAL DEFAULT 0,
+        sort_order INTEGER DEFAULT 0
+      )`,
     ],
     "write"
   );
+
+  // Idempotent column additions for databases created before these fields existed.
+  const migrations = [
+    `ALTER TABLE orders ADD COLUMN user_id INTEGER`,
+    `ALTER TABLE orders ADD COLUMN gift_wrap_name TEXT`,
+    `ALTER TABLE orders ADD COLUMN gift_wrap_price REAL DEFAULT 0`,
+  ];
+  for (const sql of migrations) {
+    try {
+      await db.execute(sql);
+    } catch {
+      // column already exists — safe to ignore
+    }
+  }
+
   await seedIfEmpty();
 }
 
@@ -127,6 +161,7 @@ export type ProductRow = {
 
 export type OrderRow = {
   id: number;
+  user_id: number | null;
   items: string;
   customer_name: string;
   email: string;
@@ -135,7 +170,27 @@ export type OrderRow = {
   city: string;
   pincode: string;
   gift_message: string | null;
+  gift_wrap_name: string | null;
+  gift_wrap_price: number;
   total: number;
   status: string;
   created_at: string;
+};
+
+export type UserRow = {
+  id: number;
+  name: string;
+  email: string;
+  password_hash: string;
+  created_at: string;
+};
+
+export type GiftWrapRow = {
+  id: number;
+  name: string;
+  slug: string;
+  description: string;
+  image: string | null;
+  price: number;
+  sort_order: number;
 };

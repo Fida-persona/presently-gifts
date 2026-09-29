@@ -1,26 +1,43 @@
 "use server";
 
+import bcrypt from "bcryptjs";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import {
   createCategory,
+  createGiftWrap,
   createOccasion,
   createOrder,
   createProduct,
+  createUser,
   deleteCategory,
+  deleteGiftWrap,
   deleteOccasion,
   deleteProduct,
   getCategoryBySlug,
+  getGiftWrapById,
+  getGiftWrapBySlug,
   getOccasionBySlug,
   getProductBySlug,
+  getUserByEmail,
   updateCategory,
+  updateGiftWrap,
   updateOccasion,
   updateOrderStatus,
   updateProduct,
 } from "./data";
 import { db, dbReady } from "./db";
-import { ADMIN_COOKIE, checkAdminPassword, createSessionToken, isAdminRequest } from "./auth";
+import {
+  ADMIN_COOKIE,
+  CUSTOMER_COOKIE,
+  CUSTOMER_MAX_AGE_MS,
+  checkAdminPassword,
+  createCustomerToken,
+  createSessionToken,
+  getCurrentUserId,
+  isAdminRequest,
+} from "./auth";
 import { slugify } from "./utils";
 import type { CartItem } from "./types";
 
@@ -40,13 +57,16 @@ async function uniqueSlug(base: string, exists: (slug: string) => Promise<boolea
   return slug;
 }
 
-async function getExistingSlug(table: "products" | "occasions", id: number): Promise<string | undefined> {
+async function getExistingSlug(
+  table: "products" | "occasions" | "gift_wraps",
+  id: number
+): Promise<string | undefined> {
   await dbReady;
   const res = await db.execute({ sql: `SELECT slug FROM ${table} WHERE id = ?`, args: [id] });
   return res.rows[0] ? String(res.rows[0][0]) : undefined;
 }
 
-// ---------- Auth ----------
+// ---------- Admin Auth ----------
 export async function loginAction(_prevState: { error?: string } | undefined, formData: FormData) {
   const password = String(formData.get("password") ?? "");
   if (!checkAdminPassword(password)) {
@@ -66,6 +86,66 @@ export async function logoutAction() {
   const store = await cookies();
   store.delete(ADMIN_COOKIE);
   redirect("/admin/login");
+}
+
+// ---------- Customer Auth ----------
+async function setCustomerSession(userId: number) {
+  const store = await cookies();
+  store.set(CUSTOMER_COOKIE, createCustomerToken(userId), {
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
+    maxAge: CUSTOMER_MAX_AGE_MS / 1000,
+  });
+}
+
+export async function signUpAction(
+  _prevState: { error?: string } | undefined,
+  formData: FormData
+) {
+  const name = String(formData.get("name") ?? "").trim();
+  const email = String(formData.get("email") ?? "").trim();
+  const password = String(formData.get("password") ?? "");
+  const next = String(formData.get("next") ?? "/") || "/";
+
+  if (!name || !email || password.length < 6) {
+    return { error: "Please enter your name, email, and a password of at least 6 characters." };
+  }
+  const existing = await getUserByEmail(email);
+  if (existing) {
+    return { error: "An account with this email already exists. Try signing in instead." };
+  }
+
+  const passwordHash = await bcrypt.hash(password, 10);
+  const userId = await createUser({ name, email, passwordHash });
+  await setCustomerSession(userId);
+  redirect(next);
+}
+
+export async function signInAction(
+  _prevState: { error?: string } | undefined,
+  formData: FormData
+) {
+  const email = String(formData.get("email") ?? "").trim();
+  const password = String(formData.get("password") ?? "");
+  const next = String(formData.get("next") ?? "/") || "/";
+
+  const user = await getUserByEmail(email);
+  if (!user) {
+    return { error: "No account found with this email." };
+  }
+  const valid = await bcrypt.compare(password, user.passwordHash);
+  if (!valid) {
+    return { error: "Incorrect password. Please try again." };
+  }
+  await setCustomerSession(user.id);
+  redirect(next);
+}
+
+export async function signOutAction() {
+  const store = await cookies();
+  store.delete(CUSTOMER_COOKIE);
+  redirect("/");
 }
 
 // ---------- Products ----------
@@ -218,11 +298,57 @@ export async function deleteCategoryAction(id: number) {
   revalidatePath("/");
 }
 
+// ---------- Gift Wraps ----------
+export async function createGiftWrapAction(formData: FormData) {
+  await requireAdmin();
+  const name = String(formData.get("name") ?? "").trim();
+  await createGiftWrap({
+    name,
+    slug: await uniqueSlug(name, async (s) => !!(await getGiftWrapBySlug(s))),
+    description: String(formData.get("description") ?? ""),
+    image: String(formData.get("image") ?? ""),
+    price: Number(formData.get("price") ?? 0),
+    sortOrder: Number(formData.get("sortOrder") ?? 0),
+  });
+  revalidatePath("/admin/gift-wraps");
+  revalidatePath("/checkout");
+  redirect("/admin/gift-wraps?created=1");
+}
+
+export async function updateGiftWrapAction(id: number, formData: FormData) {
+  await requireAdmin();
+  const name = String(formData.get("name") ?? "").trim();
+  const existingSlug = await getExistingSlug("gift_wraps", id);
+  await updateGiftWrap(id, {
+    name,
+    slug: existingSlug ?? (await uniqueSlug(name, async (s) => !!(await getGiftWrapBySlug(s)))),
+    description: String(formData.get("description") ?? ""),
+    image: String(formData.get("image") ?? ""),
+    price: Number(formData.get("price") ?? 0),
+    sortOrder: Number(formData.get("sortOrder") ?? 0),
+  });
+  revalidatePath("/admin/gift-wraps");
+  revalidatePath("/checkout");
+  redirect("/admin/gift-wraps?saved=1");
+}
+
+export async function deleteGiftWrapAction(id: number) {
+  await requireAdmin();
+  await deleteGiftWrap(id);
+  revalidatePath("/admin/gift-wraps");
+  revalidatePath("/checkout");
+}
+
 // ---------- Orders ----------
 export async function placeOrderAction(
   _prevState: { error?: string } | undefined,
   formData: FormData
 ) {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    return { error: "Please sign in to place your order." };
+  }
+
   const itemsRaw = String(formData.get("items") ?? "[]");
   let items: CartItem[] = [];
   try {
@@ -232,9 +358,14 @@ export async function placeOrderAction(
   }
   if (!items.length) return { error: "Your cart is empty." };
 
-  const total = items.reduce((sum, i) => sum + i.price * i.qty, 0);
+  const giftWrapId = formData.get("giftWrapId") ? Number(formData.get("giftWrapId")) : null;
+  const giftWrap = giftWrapId ? await getGiftWrapById(giftWrapId) : null;
+
+  const subtotal = items.reduce((sum, i) => sum + i.price * i.qty, 0);
+  const total = subtotal + (giftWrap?.price ?? 0);
 
   const id = await createOrder({
+    userId,
     items,
     customerName: String(formData.get("name") ?? ""),
     email: String(formData.get("email") ?? ""),
@@ -243,11 +374,14 @@ export async function placeOrderAction(
     city: String(formData.get("city") ?? ""),
     pincode: String(formData.get("pincode") ?? ""),
     giftMessage: String(formData.get("giftMessage") ?? "") || null,
+    giftWrapName: giftWrap?.name ?? null,
+    giftWrapPrice: giftWrap?.price ?? 0,
     total,
   });
 
   revalidatePath("/admin/orders");
   revalidatePath("/admin");
+  revalidatePath("/account/orders");
   redirect(`/order-success/${id}`);
 }
 

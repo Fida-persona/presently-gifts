@@ -58,6 +58,12 @@ export default async function AdminOrderDetailPage({
             </div>
           ))}
         </div>
+        {order.giftWrapName && (
+          <div className="mt-4 flex justify-between border-t border-rose-100 pt-4 text-sm text-ink-900/60">
+            <span>🎁 Gift Wrap — {order.giftWrapName}</span>
+            <span>{order.giftWrapPrice > 0 ? formatCurrency(order.giftWrapPrice) : "Free"}</span>
+          </div>
+        )}
         <div className="mt-4 flex justify-between border-t border-rose-100 pt-4 font-semibold">
           <span>Total</span>
           <span>{formatCurrency(order.total)}</span>

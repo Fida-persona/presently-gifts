@@ -1,6 +1,16 @@
-import { db, dbReady, rowToObject, OccasionRow, CategoryRow, ProductRow, OrderRow } from "./db";
+import {
+  db,
+  dbReady,
+  rowToObject,
+  OccasionRow,
+  CategoryRow,
+  ProductRow,
+  OrderRow,
+  UserRow,
+  GiftWrapRow,
+} from "./db";
 import type { InValue } from "@libsql/client";
-import type { Occasion, Category, Product, Order, CartItem } from "./types";
+import type { Occasion, Category, Product, Order, CartItem, User, GiftWrap } from "./types";
 
 function toOccasion(r: OccasionRow): Occasion {
   return {
@@ -42,6 +52,7 @@ function toProduct(r: ProductRow): Product {
 function toOrder(r: OrderRow): Order {
   return {
     id: r.id,
+    userId: r.user_id,
     items: JSON.parse(r.items || "[]") as CartItem[],
     customerName: r.customer_name,
     email: r.email,
@@ -50,9 +61,27 @@ function toOrder(r: OrderRow): Order {
     city: r.city,
     pincode: r.pincode,
     giftMessage: r.gift_message,
+    giftWrapName: r.gift_wrap_name,
+    giftWrapPrice: r.gift_wrap_price ?? 0,
     total: r.total,
     status: r.status,
     createdAt: r.created_at,
+  };
+}
+
+function toUser(r: UserRow): User {
+  return { id: r.id, name: r.name, email: r.email };
+}
+
+function toGiftWrap(r: GiftWrapRow): GiftWrap {
+  return {
+    id: r.id,
+    name: r.name,
+    slug: r.slug,
+    description: r.description,
+    image: r.image ?? "",
+    price: r.price,
+    sortOrder: r.sort_order,
   };
 }
 
@@ -287,9 +316,10 @@ export async function createOrder(
 ): Promise<number> {
   await dbReady;
   const res = await db.execute({
-    sql: `INSERT INTO orders (items, customer_name, email, phone, address, city, pincode, gift_message, total, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'placed')`,
+    sql: `INSERT INTO orders (user_id, items, customer_name, email, phone, address, city, pincode, gift_message, gift_wrap_name, gift_wrap_price, total, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'placed')`,
     args: [
+      data.userId,
       JSON.stringify(data.items),
       data.customerName,
       data.email,
@@ -298,6 +328,8 @@ export async function createOrder(
       data.city,
       data.pincode,
       data.giftMessage,
+      data.giftWrapName,
+      data.giftWrapPrice,
       data.total,
     ],
   });
@@ -313,6 +345,15 @@ export async function getOrders(): Promise<Order[]> {
   return res.rows.map((r) => toOrder(rowToObject<OrderRow>(res.columns, r)));
 }
 
+export async function getOrdersByUserId(userId: number): Promise<Order[]> {
+  await dbReady;
+  const res = await db.execute({
+    sql: `SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC`,
+    args: [userId],
+  });
+  return res.rows.map((r) => toOrder(rowToObject<OrderRow>(res.columns, r)));
+}
+
 export async function getOrderById(id: number): Promise<Order | null> {
   await dbReady;
   const res = await db.execute({ sql: `SELECT * FROM orders WHERE id = ?`, args: [id] });
@@ -322,6 +363,80 @@ export async function getOrderById(id: number): Promise<Order | null> {
 export async function updateOrderStatus(id: number, status: string) {
   await dbReady;
   await db.execute({ sql: `UPDATE orders SET status = ? WHERE id = ?`, args: [status, id] });
+}
+
+// ---------- Users ----------
+export async function createUser(data: {
+  name: string;
+  email: string;
+  passwordHash: string;
+}): Promise<number> {
+  await dbReady;
+  const res = await db.execute({
+    sql: `INSERT INTO users (name, email, password_hash) VALUES (?, ?, ?)`,
+    args: [data.name, data.email.toLowerCase().trim(), data.passwordHash],
+  });
+  return Number(res.lastInsertRowid);
+}
+
+export async function getUserByEmail(
+  email: string
+): Promise<(User & { passwordHash: string }) | null> {
+  await dbReady;
+  const res = await db.execute({
+    sql: `SELECT * FROM users WHERE email = ?`,
+    args: [email.toLowerCase().trim()],
+  });
+  if (!res.rows[0]) return null;
+  const row = rowToObject<UserRow>(res.columns, res.rows[0]);
+  return { ...toUser(row), passwordHash: row.password_hash };
+}
+
+export async function getUserById(id: number): Promise<User | null> {
+  await dbReady;
+  const res = await db.execute({ sql: `SELECT * FROM users WHERE id = ?`, args: [id] });
+  return res.rows[0] ? toUser(rowToObject<UserRow>(res.columns, res.rows[0])) : null;
+}
+
+// ---------- Gift Wraps ----------
+export async function getGiftWraps(): Promise<GiftWrap[]> {
+  await dbReady;
+  const res = await db.execute(`SELECT * FROM gift_wraps ORDER BY sort_order ASC, id ASC`);
+  return res.rows.map((r) => toGiftWrap(rowToObject<GiftWrapRow>(res.columns, r)));
+}
+
+export async function getGiftWrapById(id: number): Promise<GiftWrap | null> {
+  await dbReady;
+  const res = await db.execute({ sql: `SELECT * FROM gift_wraps WHERE id = ?`, args: [id] });
+  return res.rows[0] ? toGiftWrap(rowToObject<GiftWrapRow>(res.columns, res.rows[0])) : null;
+}
+
+export async function getGiftWrapBySlug(slug: string): Promise<GiftWrap | null> {
+  await dbReady;
+  const res = await db.execute({ sql: `SELECT * FROM gift_wraps WHERE slug = ?`, args: [slug] });
+  return res.rows[0] ? toGiftWrap(rowToObject<GiftWrapRow>(res.columns, res.rows[0])) : null;
+}
+
+export async function createGiftWrap(data: Omit<GiftWrap, "id">): Promise<number> {
+  await dbReady;
+  const res = await db.execute({
+    sql: `INSERT INTO gift_wraps (name, slug, description, image, price, sort_order) VALUES (?, ?, ?, ?, ?, ?)`,
+    args: [data.name, data.slug, data.description, data.image, data.price, data.sortOrder],
+  });
+  return Number(res.lastInsertRowid);
+}
+
+export async function updateGiftWrap(id: number, data: Omit<GiftWrap, "id">) {
+  await dbReady;
+  await db.execute({
+    sql: `UPDATE gift_wraps SET name=?, slug=?, description=?, image=?, price=?, sort_order=? WHERE id=?`,
+    args: [data.name, data.slug, data.description, data.image, data.price, data.sortOrder, id],
+  });
+}
+
+export async function deleteGiftWrap(id: number) {
+  await dbReady;
+  await db.execute({ sql: `DELETE FROM gift_wraps WHERE id = ?`, args: [id] });
 }
 
 // ---------- Dashboard stats ----------
